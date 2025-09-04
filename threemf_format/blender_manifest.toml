@@ -1,0 +1,46 @@
+schema_version = "1.0.0"
+id = "threemf_format"
+version = "0.0.1"
+name = "ThreeMF (.3mf) Import/Export"
+tagline = "A 3D Manufacturing Format (.3mf) Importer/Exporter"
+maintainer = "Hell of the Devil"
+type = "add-on"
+credits = ["https://github.com/3MFConsortium/lib3mf", "https://github.com/Ghostkeeper/Blender3mfFormat"]
+
+website = "https://github.com/hell-of-the-devil/ThreeMF"
+tags = ["Import-Export"]
+
+blender_version_min = "4.2.0"
+# blender_version_max = "5.1.0"
+
+# License conforming to https://spdx.org/licenses/ (use "SPDX: prefix)
+# https://docs.blender.org/manual/en/dev/advanced/extensions/licenses.html
+license = [
+  "SPDX:GPL-3.0-or-later",
+]
+# copyright = [
+#   "2002-2024 Developer Name",
+#   "1998 Company Name",
+# ]
+
+platforms = ["windows-x64", "macos-arm64", "linux-x64"]
+
+wheels = [
+    "./wheels/lib3mf-2.4.1-py3-none-win_amd64.whl"
+]
+
+[permissions]
+# network = "Need to sync motion-capture data to server"
+files = "Import/export .3mf from/to disk"
+# clipboard = "Copy and paste bone transforms"
+
+# # Optional: advanced build settings.
+# # https://docs.blender.org/manual/en/dev/advanced/extensions/command_line_arguments.html#command-line-args-extension-build
+# [build]
+# # These are the default build excluded patterns.
+# # You only need to edit them if you want different options.
+# paths_exclude_pattern = [
+#   "__pycache__/",
+#   "/.git/",
+#   "/*.zip",
+# ]
