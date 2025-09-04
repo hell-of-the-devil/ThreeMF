@@ -17,7 +17,7 @@ class Import3MF(bpy.types.Operator, ImportHelper):
     filter_glob: StringProperty(default="*.3mf", options={'HIDDEN'}, maxlen=255) ## type: ignore
     
     def execute(self, context):
-        filepath = self.filepath 
+        filepath = self.filepath ## type: ignore
         wrapper = lib3mf.get_wrapper()
         model: lib3mf.Model = wrapper.CreateModel() ## type: ignore
 
@@ -26,50 +26,56 @@ class Import3MF(bpy.types.Operator, ImportHelper):
             reader.ReadFromFile(filepath)
 
             ## create new blender mesh object
-            me = bpy.data.meshes.new("3MF_Mesh")
             bm = bmesh.new()
 
             ## iterate our model meshes
             # for build_item in model.GetObjects():
-            bi: lib3mf.BuildItemIterator = model.GetBuildItems()
+            bi: lib3mf.ObjectIterator = model.GetObjects()
+            meshes = []
+
             while bi.MoveNext():
-                mesh_object: lib3mf.BuildItem = bi.GetCurrent()
-                mesh: lib3mf.MeshObject = mesh_object.GetObjectResource()
+                obj = bi.GetCurrentObject()
+                if isinstance(obj, lib3mf.MeshObject):
+                    ## we have a mesh object
+                    me = bpy.data.meshes.new("3MF_Mesh")
 
-                if isinstance(mesh, lib3mf.MeshObject):
-                    ## get our vertices and triangles
-                    vertices = mesh.GetVertices()
-                    triangles = mesh.GetTriangleIndices()
+                    translation = self._3mf2blender_translation(obj)
 
-                    ## convert vertex data to tuple for blender
-                    verts = [(v.Coordinates[0], v.Coordinates[1], v.Coordinates[2]) for v in vertices]
-
-                    ## convert triangle data to a list[tuple] for Blender
-                    faces = []
-                    for t in triangles:
-                        ## lib3mf returns the indices as a C-style array, we convert this to a tuple for blender
-                        indices = (t.Indices[0], t.Indices[1], t.Indices[2])
-                        faces.append(indices)
-
-                    ## create a new blender mesh from the data
-                    me.from_pydata(verts, [], faces)
+                    me.from_pydata(*translation)
+                    meshes.append(me)
             
-            ## link new mesh to scene
-            obj = bpy.data.objects.new("3mf_object", me)
-            if context.collection:
-                context.collection.objects.link(obj)
+            for mesh in meshes:
+                obj = bpy.data.objects.new("3MF_Object", mesh)
 
-            ## select and make active
-            if bpy.context.view_layer:
-                bpy.context.view_layer.objects.active = obj
-            obj.select_set(True)
+                if context.collection:
+                    context.collection.objects.link(obj)
 
-            self.report({'INFO'}, f"Successfully imported {len(verts)} verticies from {filepath}")
+                ## select and make active
+                if bpy.context.view_layer:
+                    bpy.context.view_layer.objects.active = obj
+                obj.select_set(True)
+
+                self.report({'INFO'}, f"obj = {obj}")
             return {'FINISHED'}
         except Exception as e:
             self.report({'ERROR'}, f"Failed to import 3MF file: {e}")
             return {'CANCELLED'}
-        
+    def _3mf2blender_translation(self, mesh):
+        vertices = mesh.GetVertices()
+        triangles = mesh.GetTriangleIndices()
+
+        ## convert vertex data to tuple for blender
+        verts = [(v.Coordinates[0], v.Coordinates[1], v.Coordinates[2]) for v in vertices]
+
+        ## convert triangle data to a list[tuple] for Blender
+        faces = []
+        for t in triangles:
+            ## lib3mf returns the indices as a C-style array, we convert this to a tuple for blender
+            indices = (t.Indices[0], t.Indices[1], t.Indices[2])
+            faces.append(indices)
+
+        return (verts, [], faces)
+
 classes = (Import3MF,)
 
 class MF_OT_preferences(bpy.types.Operator):
