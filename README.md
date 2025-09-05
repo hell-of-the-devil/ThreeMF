@@ -12,7 +12,7 @@ If you do wish to contribute to the project, i'm not a fussy guy, feel free to s
 if there is anything that I don't approve of, i'll happily refractor it (I doubt i'll ever not approve something though)
 
 ## Credits
-[@Keaza] - helped alot with planning and discussion :)
-https://github.com/3MFConsortium/lib3mf - although undocumented, a lovely little .3mf library, taught me alot about the format
-https://github.com/Ghostkeeper/Blender3mfFormat - A similar, however outdated library of which threeMF was initially based on.
-https://blender.stackexchange.com - they're all just absolute GOATS
+- [@Keaza] - helped alot with planning and discussion :)
+- https://github.com/3MFConsortium/lib3mf - although undocumented, a lovely little .3mf library, taught me alot about the format
+- https://github.com/Ghostkeeper/Blender3mfFormat - A similar, however outdated library of which threeMF was initially based on.
+- https://blender.stackexchange.com - they're all just absolute GOATS
