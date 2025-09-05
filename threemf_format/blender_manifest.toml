@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "threemf_format"
-version = "0.0.2"
+version = "0.0.3"
 name = "ThreeMF (.3mf) Import/Export"
 tagline = "A 3D Manufacturing Format (.3mf) Importer/Exporter"
 maintainer = "Hell of the Devil"
