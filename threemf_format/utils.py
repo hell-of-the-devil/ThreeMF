@@ -33,6 +33,11 @@ def create_texture_material(name, image_path, uv_layer_name="UVMap"):
 
     return mat
 
+def show_message(context, message="Something happened"):
+    def draw(self, _context):
+        self.layout.label(text=message)
+    context.window_manager.popup_menu(draw, title="Info", icon='INFO')
+
 def lib3mf_color_to_linear(color):
     def srgb_to_linear(c):
         return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4

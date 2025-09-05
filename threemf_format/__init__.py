@@ -2,37 +2,85 @@ import bpy, bmesh, os, importlib, sys, subprocess
 from bpy.props import StringProperty, BoolProperty
 from bpy.types import Context, Material
 from bpy_extras.io_utils import ImportHelper, ExportHelper
-import lib3mf
+import lib3mf, tempfile
 
-from .utils import lib3mf_color_to_linear, create_principled_material, create_texture_material
+from .utils import lib3mf_color_to_linear, create_principled_material, create_texture_material, show_message
 
 class ThreeMFModel:
-    def __init__(self, filepath=None):
+    def __init__(self, operator: bpy.types.Operator, context: Context, filepath=None):
+        self.operator = operator
+        self.context = context
         self.wrapper = lib3mf.get_wrapper()
         self.model: lib3mf.Model = self.wrapper.CreateModel() ## type: ignore
         if filepath:
             self.model.QueryReader("3mf").ReadFromFile(filepath)
 
     def _import_populate_materials(self):
-        color_groups: lib3mf.ColorGroupIterator = self.model.GetColorGroups()
-
         materials = {}
 
+        ## color groups
+        color_groups: lib3mf.ColorGroupIterator = self.model.GetColorGroups()
+
         while color_groups.MoveNext():
-            group: lib3mf.ColorGroup = color_groups.GetCurrentColorGroup()
-            prop_ids = group.GetAllPropertyIDs()
+            c_group: lib3mf.ColorGroup = color_groups.GetCurrentColorGroup()
+            prop_ids = c_group.GetAllPropertyIDs()
 
             for pid in prop_ids:
-                color = group.GetColor(pid)
+                color = c_group.GetColor(pid)
 
                 linear_rgba = lib3mf_color_to_linear(color)
-                mat_name = f"ColorGroup_{group.GetResourceID()}_{pid}"
+                mat_name = f"ColorGroup_{c_group.GetResourceID()}_{pid}"
                 mat = create_principled_material(mat_name, color=linear_rgba, alpha=linear_rgba[3])
-                materials[(group.GetResourceID(), pid)] = mat
-
+                materials[(c_group.GetResourceID(), pid)] = mat
         return materials
 
-    def _import_mesh_objects(self, context, materials: dict[tuple[int, int], Material]):
+    def _import_textures(self):
+        textures: lib3mf.Texture2DIterator = self.model.GetTexture2Ds()
+        tex_map = {}
+
+        while textures.MoveNext():
+            tex: lib3mf.Texture2D = textures.GetCurrentTexture2D()
+            attachment = tex.GetAttachment()
+
+            ## If the 3MF has an embedded file, write it out to a temp path
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            attachment.WriteToFile(tmp.name)   ## <--- this works in most Python wrappers
+
+            # Load into Blender
+            image = bpy.data.images.load(tmp.name)
+
+            tex_map[tex.GetResourceID()] = image
+
+        return tex_map
+    
+    def _import_texture_materials(self, tex_map):
+        groups: lib3mf.Texture2DGroupIterator = self.model.GetTexture2DGroups()
+        mat_map = {}
+
+        while groups.MoveNext():
+            group: lib3mf.Texture2DGroup = groups.GetCurrentTexture2DGroup()
+            tex_id: lib3mf.Texture2D = group.GetTexture2D()
+            image = tex_map.get(tex_id.GetResourceID())
+
+            if not image:
+                continue
+
+            ## make our textured material
+            mat = bpy.data.materials.new(name=f"TextureMat_{group.GetResourceID()}")
+            mat.use_nodes = True
+            nodes = mat.node_tree.nodes
+            links = mat.node_tree.links
+
+            principled = nodes.get("Principled BSDF")
+            tex_node = nodes.new("ShaderNodeTexImage")
+            tex_node.image = image
+            links.new(tex_node.outputs["Color"], principled.inputs["Base Color"])
+
+            mat_map[group.GetResourceID()] = (mat, group)
+
+        return mat_map
+
+    def _import_mesh_objects(self, textures: dict[int, Material], materials: dict[tuple[int, int], Material]):
         bi: lib3mf.MeshObjectIterator = self.model.GetMeshObjects()
 
         while bi.MoveNext():
@@ -44,12 +92,15 @@ class ThreeMFModel:
             me.from_pydata(verts, [], faces)
             # meshes.append(me)
 
+            ## apply textures
+            self._apply_textures_to_mesh(mesh, me, textures)
+
             obj = bpy.data.objects.new(mesh.GetName() or '3mf Object', me)
 
-            if context.collection:
-                context.collection.objects.link(obj)
+            if self.context.collection:
+                self.context.collection.objects.link(obj)
 
-            # Assign materials to the mesh
+            ## Assign materials to the mesh
             props = mesh.GetAllTriangleProperties()
             mat_indices = {}
             for t_index, t in enumerate(faces):
@@ -57,11 +108,11 @@ class ThreeMFModel:
                 key = (prop.ResourceID, prop.PropertyIDs[0])  # ColorGroup + property
                 mat = materials.get(key)
                 if mat:
-                    # Add material to mesh if not added yet
+                    ## Add material to mesh if not added yet
                     if mat.name not in obj.data.materials:
                         obj.data.materials.append(mat)
                     mat_slot_index = obj.data.materials.find(mat.name)
-                    # Assign polygon’s material index
+                    ## Assign polygon’s material index
                     me.polygons[t_index].material_index = mat_slot_index
 
             ## select and make active
@@ -88,6 +139,29 @@ class ThreeMFModel:
             faces.append(indices)
 
         return (verts, [], faces)
+    
+    def _apply_textures_to_mesh(self, mesh: lib3mf.MeshObject, me: bpy.types.Mesh, mat_map):
+        ## Ensure UV layer
+        uv_layer = me.uv_layers.new(name="UVMap")
+        uv_data = uv_layer.data
+
+        for t_index, tri in enumerate(mesh.GetTriangleIndices()):
+            prop = mesh.GetTriangleProperties(t_index)
+            
+            if prop.ResourceID in mat_map:
+                mat, group = mat_map[prop.ResourceID]
+
+                ## Add material if not already in mesh
+                if mat.name not in me.materials:
+                    me.materials.append(mat)
+                mat_index = me.materials.find(mat.name)
+                me.polygons[t_index].material_index = mat_index
+
+                ## Assign UVs (per corner)
+                for corner in range(3):
+                    uv_coord = group.GetTex2Coord(prop.PropertyIDs[corner])
+                    loop_index = me.polygons[t_index].loop_indices[corner]
+                    uv_data[loop_index].uv = (uv_coord.U, uv_coord.V)
 
 class Import3MF(bpy.types.Operator, ImportHelper):
     """
@@ -104,11 +178,12 @@ class Import3MF(bpy.types.Operator, ImportHelper):
         filepath = self.filepath ## type: ignore
 
         try:
-            tmf_model = ThreeMFModel(filepath=filepath)
+            tmf_model = ThreeMFModel(self, context=context, filepath=filepath)
             materials = tmf_model._import_populate_materials()
-            self.report({'INFO'}, f"materials = {materials}")
-            tmf_model._import_mesh_objects(context, materials)
-
+            textures = tmf_model._import_textures()
+            texture_materials = tmf_model._import_texture_materials(textures)
+            self.report({'INFO'}, f"texture = {texture_materials}")
+            tmf_model._import_mesh_objects(texture_materials, materials)
             return {'FINISHED'}
         except Exception as e:
             self.report({'ERROR'}, f"Failed to import 3MF file: {e}")
